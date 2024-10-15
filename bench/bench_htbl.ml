@@ -9,7 +9,7 @@ end
 
 let run_one ~budgetf ~n_domains ?(n_ops = 20 * Util.iter_factor)
     ?(n_keys = 10000) ~percent_mem ?(percent_add = (100 - percent_mem + 1) / 2)
-    ?(prepopulate = true) (module Htbl : Htbl_intf.HTBL) =
+    ?(prepopulate = true) ~unsafe (module Htbl : Htbl_intf.HTBL) =
   let percent_rem = 100 - (percent_mem + percent_add) in
 
   let limit_mem = percent_mem in
@@ -64,20 +64,22 @@ let run_one ~budgetf ~n_domains ?(n_ops = 20 * Util.iter_factor)
   in
 
   let config =
-    Printf.sprintf "%d workers, %d%% mem %d%% add %d%% rem" n_domains
+    Printf.sprintf "%d workers, %d%% mem %d%% add %d%% rem %s" n_domains
       percent_mem percent_add percent_rem
+      (if unsafe then " (unsafe)" else "")
   in
+
   Times.record ~budgetf ~n_domains ~init ~work ()
   |> Times.to_thruput_metrics ~n:n_ops ~singular:"operation" ~config
 
 let run_suite ~budgetf =
-  let run (module Htbl : Htbl_intf.HTBL) =
+  let run ~unsafe (module Htbl : Htbl_intf.HTBL) =
     Util.cross [ 10; 50; 90 ] [ 1; 2; 4 ]
     |> List.concat_map @@ fun (percent_mem, n_domains) ->
-       run_one ~budgetf ~n_domains ~percent_mem (module Htbl)
+       run_one ~budgetf ~n_domains ~percent_mem ~unsafe (module Htbl)
   in
   List.fold_right2
     (fun safe unsafe acc -> safe :: unsafe :: acc)
-    (run (module Saturn_lockfree.Htbl))
-    (run (module Saturn_lockfree.Htbl_unsafe))
+    (run ~unsafe:false (module Saturn_lockfree.Htbl))
+    (run ~unsafe:true (module Saturn_lockfree.Htbl_unsafe))
     []
