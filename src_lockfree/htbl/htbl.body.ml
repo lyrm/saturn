@@ -149,6 +149,8 @@ let[@tail_mod_cons] rec filter_ t msk chk = function
         Cons { r with rest = filter_ t msk chk r.rest }
       else filter_ t msk chk r.rest
 
+let nil_with_used_once = Nil_with_size { size_modifier = Size.used_once }
+
 let[@tail_mod_cons] rec filter_fst t mask chk = function
   | Nil -> Nil_with_size { size_modifier = Size.used_once }
   | Cons r ->
@@ -433,10 +435,11 @@ let rec try_add t key value backoff =
             }
         in
         if Atomic_array.unsafe_compare_and_set r.buckets i (B before) (B after)
-        then (
+        then begin
           Size.update_once r.size cons_r.size_modifier;
           cons_r.size_modifier <- Size.used_once;
-          adjust_size t r mask true)
+          adjust_size t r mask true
+        end
         else try_add t key value (Backoff.once backoff)
   | B (Resize _) ->
       let _ = finish t (Atomic.get t) in
@@ -458,9 +461,10 @@ let rec remove_node t key backoff =
   let i = h land mask in
   match Atomic_array.unsafe_fenceless_get r.buckets i with
   | B (Nil_with_size nil_r) ->
-      if nil_r.size_modifier != Size.used_once then (
+      if nil_r.size_modifier != Size.used_once then begin
         Size.update_once r.size nil_r.size_modifier;
-        nil_r.size_modifier <- Size.used_once);
+        nil_r.size_modifier <- Size.used_once
+      end;
       Nil
   | B (Cons_with_size cons_r as before) -> begin
       if cons_r.size_modifier != Size.used_once then
@@ -480,10 +484,11 @@ let rec remove_node t key backoff =
             if
               Atomic_array.unsafe_compare_and_set r.buckets i (B before)
                 (B after)
-            then (
+            then begin
               Size.update_once r.size nil_r.size_modifier;
               nil_r.size_modifier <- Size.used_once;
-              adjust_size t r mask found_node)
+              adjust_size t r mask found_node
+            end
             else remove_node t key (Backoff.once backoff)
         | Cons next ->
             let (Cons_with_size cons_r as after) :
@@ -499,10 +504,11 @@ let rec remove_node t key backoff =
             if
               Atomic_array.unsafe_compare_and_set r.buckets i (B before)
                 (B after)
-            then (
+            then begin
               Size.update_once r.size cons_r.size_modifier;
               cons_r.size_modifier <- Size.used_once;
-              adjust_size t r mask found_node)
+              adjust_size t r mask found_node
+            end
             else remove_node t key (Backoff.once backoff)
       else
         match dissoc r.equal key cons_r.rest with
@@ -510,10 +516,11 @@ let rec remove_node t key backoff =
             if
               Atomic_array.unsafe_compare_and_set r.buckets i (B before)
                 (B (Cons_with_size { cons_r with rest; size_modifier }))
-            then (
+            then begin
               Size.update_once r.size cons_r.size_modifier;
               cons_r.size_modifier <- Size.used_once;
-              assoc_node r.equal key cons_r.rest |> adjust_size t r mask)
+              assoc_node r.equal key cons_r.rest |> adjust_size t r mask
+            end
             else remove_node t key (Backoff.once backoff)
         | exception Not_found -> Nil
     end
@@ -543,7 +550,7 @@ let rec snapshot t ~clear backoff =
           if i = Atomic_array.length snapshot then Seq.Nil
           else
             loop (i + 1)
-              (match Atomic_array.unsafe_fenceless_get snapshot i with
+              begin match Atomic_array.unsafe_fenceless_get snapshot i with
               | B (Resize { spine = Nil_with_size _ }) -> Nil
               | B (Resize { spine = Cons_with_size cons_r }) ->
                   Cons
@@ -557,7 +564,8 @@ let rec snapshot t ~clear backoff =
                      buckets. *)
                   assert false)
               ()
-      | Cons r -> Seq.Cons ((r.key, r.value), loop i r.rest)
+      | Cons r -> Seq.Cons ((r.key, r.value), loop i r.rest
+              end
     in
     loop 0 Nil
   end
