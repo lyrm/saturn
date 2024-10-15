@@ -112,7 +112,6 @@ let rec take_at backoff size bs i =
        as spine) -> begin
       if size_modifier != Size.used_once then
         Size.update_once size size_modifier;
-
       if
         Atomic_array.unsafe_compare_and_set bs i (B spine)
           (B (Resize { spine }))
@@ -148,8 +147,6 @@ let[@tail_mod_cons] rec filter_ t msk chk = function
       if t r.key land msk = chk then
         Cons { r with rest = filter_ t msk chk r.rest }
       else filter_ t msk chk r.rest
-
-let nil_with_used_once = Nil_with_size { size_modifier = Size.used_once }
 
 let[@tail_mod_cons] rec filter_fst t mask chk = function
   | Nil -> Nil_with_size { size_modifier = Size.used_once }
@@ -222,14 +219,19 @@ let merge size (rest : ('a, 'b, [ `Nil_with_size | `Cons_with_size ]) tdt) :
         Size.update_once size r.size_modifier;
       rest
   | Cons_with_size r -> begin
+      begin
+        match rest with
+        | Nil_with_size r' ->
+            if r'.size_modifier != Size.used_once then
+              Size.update_once size r'.size_modifier
+        | Cons_with_size r' -> begin
+            if r'.size_modifier != Size.used_once then
+              Size.update_once size r'.size_modifier
+          end
+      end;
       match rest with
-      | Nil_with_size r' ->
-          if r'.size_modifier != Size.used_once then
-            Size.update_once size r'.size_modifier;
-          Cons_with_size r
+      | Nil_with_size _ -> Cons_with_size r
       | Cons_with_size r' -> begin
-          if r'.size_modifier != Size.used_once then
-            Size.update_once size r'.size_modifier;
           Cons_with_size
             {
               r with
@@ -550,7 +552,7 @@ let rec snapshot t ~clear backoff =
           if i = Atomic_array.length snapshot then Seq.Nil
           else
             loop (i + 1)
-              begin match Atomic_array.unsafe_fenceless_get snapshot i with
+              (match Atomic_array.unsafe_fenceless_get snapshot i with
               | B (Resize { spine = Nil_with_size _ }) -> Nil
               | B (Resize { spine = Cons_with_size cons_r }) ->
                   Cons
@@ -564,8 +566,7 @@ let rec snapshot t ~clear backoff =
                      buckets. *)
                   assert false)
               ()
-      | Cons r -> Seq.Cons ((r.key, r.value), loop i r.rest
-              end
+      | Cons r -> Seq.Cons ((r.key, r.value), loop i r.rest)
     in
     loop 0 Nil
   end
